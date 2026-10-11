@@ -1,9 +1,13 @@
 /*
   Arena VJ wall · versió per a Hydra (hydra.ojack.xyz)
 
-  Ús dins de l'editor de Hydra:
+  Ús dins de l'editor de Hydra (no facis servir loadScript: si falla, no diu res):
 
-    await loadScript("https://EL-TEU-HOST/arena-wall.js")
+    if (!window.arenaWall) {
+      const r = await fetch("https://EL-TEU-HOST/arena-wall.js")
+      if (!r.ok) throw new Error("arena-wall.js: HTTP " + r.status)
+      ;(0, eval)(await r.text())
+    }
     s0.init({ src: arenaCanvas, dynamic: true })
     src(s0).out()
 
@@ -102,6 +106,7 @@
   // cv és el llenç que veu Hydra. No s'afegeix a la pàgina: Hydra el llegeix com a textura.
   const cv = document.createElement("canvas");
   const ctx = cv.getContext("2d");
+  window.arenaCanvas = cv; // disponible de seguida per a Hydra
   // llenços per al mode conjunt: tota l'escena es dibuixa ací i després es deforma sencera
   const scene = document.createElement("canvas");
   const sctx = scene.getContext("2d");
@@ -1017,6 +1022,7 @@
     "E: canvia la direcció de l'estirament<br>L: lliure / collage<br>G: nou collage<br>" +
     "C: neteja el llenç<br>Espai: rebarreja<br><br>" +
     "A Hydra: <code>s0.init({src: arenaCanvas, dynamic: true})</code><br>" +
+    "Si tanques aquesta finestra: <code>arenaWall.panel()</code> o el botó ARENA.<br>" +
     "Ctrl+Shift+H amaga el codi de Hydra per capturar-ne la sortida."));
 
   // les dreceres només viuen a la finestra del panell: a Hydra interferirien amb el codi
