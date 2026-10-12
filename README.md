@@ -89,3 +89,4 @@ These work when the panel window is active.
 
 - [Hydra](https://hydra.ojack.xyz) by Olivia Jack
 - Images from [Are.na](https://www.are.na)
+- Thanks to the community of SFPC, and especial mention to [V Buckenham](https://vbuckenham.com/)
