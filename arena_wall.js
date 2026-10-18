@@ -28,7 +28,7 @@
     arenaWall.stop()             atura el mur i allibera el micròfon
 */
 (function () {
-  const VERSION = "2026-10-19 · selecció De / Fins a";
+  const VERSION = "2026-10-19 · teletext";
   if (window.arenaWall && window.arenaWall.running) {
     if (window.arenaWall.version === VERSION) {
       // ja està en marxa: no dupliquem res, només tornem a exposar el llenç
@@ -793,42 +793,128 @@
   }
 
   /* ---------------------------------------------------------------- panell (finestra emergent) */
+  /*
+    Estètica de teletext: pantalla negra, els 7 colors del teletext, franges de títol a doble
+    alçada i botons de colors com les tecles «Fastext». Lletra VT323 (estreta i pixelada,
+    però llegible en cos menut); si no carrega, es fa servir la monoespaiada del sistema.
+  */
+  const TT = { k: "#000", r: "#ff2a2a", g: "#22ff22", y: "#ffff22", b: "#2a2aff", m: "#ff2aff", c: "#22ffff", w: "#fff" };
   const CSS = `
-    html, body { margin: 0; background: #fff; font-family: monospace; }
-    #panel { box-sizing: border-box; padding: 12px 12px 24px; font-size: 11px; color: #000; }
-    #panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin: 18px 0 8px;
-      border-bottom: 1px solid #000; padding-bottom: 3px; }
-    #panel h3 { font-size: 11px; font-weight: normal; opacity: .6; margin: 10px 0 2px; }
-    .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin: 7px 0; align-items: center; }
-    .row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: #000; }
-    .row output { opacity: .6; }
+    :root { --k:${TT.k}; --r:${TT.r}; --g:${TT.g}; --y:${TT.y}; --b:${TT.b}; --m:${TT.m}; --c:${TT.c}; --w:${TT.w}; }
+    html, body { margin: 0; background: var(--k); color: var(--w);
+      font-family: "VT323", ui-monospace, "Courier New", monospace; }
+    #panel { box-sizing: border-box; padding: 0 0 24px; font-size: 17px; line-height: 1;
+      -webkit-font-smoothing: none; font-smooth: never; }
+
+    /* capçalera de pàgina: P100 ARENA·VJ 100  dl 19 oct 00:41:07 */
+    .tt-head { position: sticky; top: 0; z-index: 2; background: var(--k); padding: 6px 8px 4px;
+      display: flex; gap: 8px; white-space: nowrap; }
+    .tt-head .pg { color: var(--w); }
+    .tt-head .nm, .tt-head .clk { color: var(--y); }
+    .tt-head .clk { margin-left: auto; }
+    .tt-mosaic { height: 8px; margin-bottom: 6px;
+      background: repeating-linear-gradient(90deg, var(--c) 0 8px, var(--k) 8px 12px, var(--m) 12px 24px, var(--k) 24px 28px,
+        var(--y) 28px 36px, var(--k) 36px 40px, var(--g) 40px 52px, var(--k) 52px 56px); }
+    .tt-title { display: block; margin: 2px 8px 8px; height: 34px; overflow: hidden; }
+    .tt-title span { display: inline-block; font-size: 17px; line-height: 17px; color: var(--w);
+      transform: scaleY(2); transform-origin: top left; letter-spacing: .02em; }
+
+    /* parelles fons / text de cada secció (contrast alt, colors purs del teletext) */
+    .s0 { --bg: var(--c); --fg: var(--k); }
+    .s1 { --bg: var(--y); --fg: var(--k); }
+    .s2 { --bg: var(--b); --fg: var(--y); }
+    .s3 { --bg: var(--g); --fg: var(--k); }
+    .s4 { --bg: var(--r); --fg: var(--w); }
+    .s5 { --bg: var(--m); --fg: var(--k); }
+    .s6 { --bg: var(--w); --fg: var(--b); }
+
+    /* títol: franja invertida (color de text de la secció de fons) i doble alçada */
+    #panel h2 { font: inherit; font-size: 17px; line-height: 17px; font-weight: normal; text-transform: uppercase;
+      letter-spacing: .04em; margin: 14px 0 17px; padding: 0 8px; height: 17px;
+      color: var(--bg); background: var(--fg); transform: scaleY(2); transform-origin: top left; }
+    #panel h2.s0, #panel h2.s1, #panel h2.s3, #panel h2.s5 { background: var(--k); }
+    .sec { background: var(--bg); color: var(--fg); padding: 6px 8px 8px; }
+    .sec h3 { font: inherit; font-weight: normal; color: var(--fg); margin: 12px 0 4px;
+      border-bottom: 2px dotted var(--fg); padding-bottom: 2px; }
+    .sec h3::before { content: "▶ "; }
+    .sec ::selection { background: var(--fg); color: var(--bg); }
+
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; margin: 8px 0; align-items: center; }
+    .row output { color: var(--fg); }
+    .row output::before { content: "["; } .row output::after { content: "]"; }
     .row.inline { grid-template-columns: auto 1fr; justify-content: start; }
-    input[type=color] { width: 34px; height: 20px; padding: 0; border: 1px solid #000; background: #fff; }
-    input[type=text] { width: 100%; box-sizing: border-box; font: 11px monospace; border: 1px solid #000; padding: 4px; }
-    select { width: 100%; font: 11px monospace; border: 1px solid #000; background: #fff; padding: 3px; margin: 2px 0 4px; }
+
+    /* control lliscant: pista puntejada, polsador quadrat ple, tot del color del text */
+    input[type=range] { -webkit-appearance: none; appearance: none; grid-column: 1 / -1; width: 100%;
+      height: 14px; margin: 0; background: transparent; cursor: pointer; }
+    input[type=range]::-webkit-slider-runnable-track { height: 14px;
+      background: repeating-linear-gradient(90deg, var(--fg) 0 4px, transparent 4px 8px) center / 100% 4px no-repeat; }
+    input[type=range]::-moz-range-track { height: 4px;
+      background: repeating-linear-gradient(90deg, var(--fg) 0 4px, transparent 4px 8px); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
+      background: var(--fg); border: 0; border-radius: 0; }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; background: var(--fg); border: 0; border-radius: 0; }
+    input[type=range]:focus { outline: none; }
+    input[type=range]:focus-visible { outline: 2px dashed var(--fg); outline-offset: 2px; }
+
+    input[type=checkbox] { accent-color: var(--fg); width: 14px; height: 14px; margin: 0; }
+    input[type=color] { width: 34px; height: 18px; padding: 0; border: 2px solid var(--fg); background: var(--bg); }
+    input[type=text], select { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px;
+      color: var(--fg); background: transparent; border: 2px solid var(--fg);
+      border-radius: 0; padding: 2px 4px; margin: 3px 0 6px; outline: none; }
+    input[type=text]:focus, select:focus { background: var(--fg); color: var(--bg); }
+    input[type=text]::placeholder { color: var(--fg); opacity: .6; }
+    select option { background: var(--k); color: var(--w); }
+
+    /* botons: blocs invertits (text del color de fons); el que està actiu, buit amb vora */
     .btns { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-    button.b { font: 11px monospace; border: 1px solid #000; background: #fff; padding: 4px 7px; cursor: pointer; }
-    button.b:hover { background: #eee; }
-    button.b.on { background: #000; color: #fff; }
-    .meter { display: grid; grid-template-columns: 44px 1fr; align-items: center; margin: 3px 0; }
-    .meter div.bar { height: 6px; background: #eee; }
-    .meter div.bar i { display: block; height: 100%; width: 0; background: #000; }
-    #status { opacity: .7; margin: 10px 0 6px; line-height: 1.4; border-top: 1px solid #000; padding-top: 8px; }
-    .hint, .note { opacity: .55; line-height: 1.4; }
-    .hint { margin-top: 14px; }
-    .note { margin: 4px 0 8px; }
+    button.b { font: inherit; font-size: 17px; line-height: 1; border: 2px solid var(--fg); border-radius: 0;
+      cursor: pointer; padding: 2px 6px 1px; color: var(--bg); background: var(--fg); }
+    button.b:hover { background: transparent; color: var(--fg); }
+    button.b:active { transform: translateY(1px); }
+    button.b.on { background: transparent; color: var(--fg); }
+    button.b.on::before { content: "■ "; }
+
+    .meter { display: grid; grid-template-columns: 56px 1fr; align-items: center; margin: 3px 0; }
+    .meter div.bar { height: 10px;
+      background: repeating-linear-gradient(90deg, var(--fg) 0 2px, transparent 2px 8px) center / 100% 2px no-repeat; }
+    .meter div.bar i { display: block; height: 100%; width: 0;
+      background: repeating-linear-gradient(90deg, var(--fg) 0 6px, transparent 6px 8px); }
+
+    .note { line-height: 1.15; margin: 4px 0 8px; }
+    #status { color: var(--c); margin: 14px 8px 6px; line-height: 1.15; border-top: 4px solid var(--b); padding-top: 8px; }
+    .hint { color: var(--g); line-height: 1.15; margin: 14px 8px 0; }
+    .hint code { color: var(--y); font: inherit; }
+    .ver { color: var(--m); margin: 10px 8px 0; }
   `;
 
   const panel = el("div");
   panel.id = "panel";
+  const ttHead = el("div", "tt-head",
+    '<span class="pg">P100</span><span class="nm">ARENA·VJ</span><span class="pg">100</span><span class="clk"></span>');
+  panel.appendChild(ttHead);
+  panel.appendChild(el("div", "tt-mosaic"));
+  panel.appendChild(el("div", "tt-title", "<span>CONTROL DEL MUR</span>"));
+  const clockEl = ttHead.querySelector(".clk");
+  const DIES = ["dg", "dl", "dt", "dc", "dj", "dv", "ds"];
+  const MESOS = ["gen", "feb", "mar", "abr", "mai", "jun", "jul", "ago", "set", "oct", "nov", "des"];
+  const pad = (n) => String(n).padStart(2, "0");
+  setInterval(() => {
+    const d = new Date();
+    clockEl.textContent = `${DIES[d.getDay()]} ${d.getDate()} ${MESOS[d.getMonth()]} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }, 1000);
   const syncFns = [];
   function syncUI() { syncFns.forEach((f) => f()); }
   let statusEl = null, lastStatus = "";
   function setStatus(msg) { lastStatus = msg; if (statusEl) statusEl.textContent = msg; }
 
+  // cada secció té el seu color de fons (cicle de 7 colors del teletext) i un color de text que hi contrasta
+  let secN = 0;
   function section(title) {
-    panel.appendChild(el("h2", null, title));
-    const box = el("div");
+    const c = "s" + (secN++ % 7);
+    panel.appendChild(el("h2", c, title));
+    const box = el("div", "sec " + c);
     panel.appendChild(box);
     return box;
   }
@@ -1113,7 +1199,7 @@
     for (const k in meters) meters[k].style.width = audio.level[k] * 100 + "%";
   }
 
-  panel.appendChild(el("div", "note", "Versió: " + VERSION));
+  panel.appendChild(el("div", "note ver", "Versió: " + VERSION));
   statusEl = el("div");
   statusEl.id = "status";
   statusEl.textContent = lastStatus;
@@ -1162,8 +1248,8 @@
   opener.textContent = "ARENA";
   opener.title = "Obri el panell de l'Arena VJ wall";
   opener.style.cssText =
-    "position:fixed;right:10px;bottom:10px;z-index:99999;font:11px monospace;padding:5px 8px;" +
-    "border:1px solid #000;background:#fff;color:#000;cursor:pointer;opacity:.6;";
+    "position:fixed;right:10px;bottom:10px;z-index:99999;font:15px 'VT323',monospace;padding:4px 8px 3px;" +
+    "border:0;border-radius:0;background:#ffff22;color:#000;cursor:pointer;opacity:.85;";
   opener.onclick = () => openPanel();
   document.body.appendChild(opener);
 
@@ -1179,7 +1265,10 @@
     panelWin = w;
     const d = w.document;
     d.open();
-    d.write(`<!doctype html><html lang="ca"><head><meta charset="utf-8"><title>Arena VJ · control</title><style>${CSS}</style></head><body></body></html>`);
+    d.write(`<!doctype html><html lang="ca"><head><meta charset="utf-8"><title>Arena VJ · control</title>` +
+      `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>` +
+      `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap">` +
+      `<style>${CSS}</style></head><body></body></html>`);
     d.close();
     d.body.appendChild(d.adoptNode(panel));
     d.addEventListener("keydown", onKey);
