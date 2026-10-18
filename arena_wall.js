@@ -22,14 +22,23 @@
     arenaWall.set({ ... })       canvia paràmetres des del codi, p. ex. arenaWall.set({ scope: "global" })
     arenaWall.state              l'estat complet (es pot llegir des de Hydra, p. ex. () => arenaWall.level.bass)
     arenaWall.level              nivells d'àudio en directe: vol, peak, bass, mid, treble (0..1)
+    arenaWall.show(5, 20)        mostra de la imatge 5 a la 20 (show(5) = de la 5 fins al final)
+    arenaWall.total              nombre total d'imatges del canal
+    arenaWall.next() / .prev()   passa al grup d'imatges següent / anterior
     arenaWall.stop()             atura el mur i allibera el micròfon
 */
 (function () {
+  const VERSION = "2026-10-19 · selecció De / Fins a";
   if (window.arenaWall && window.arenaWall.running) {
-    // ja està en marxa: no dupliquem res, només tornem a exposar el llenç
-    window.arenaCanvas = window.arenaWall.canvas;
-    return;
+    if (window.arenaWall.version === VERSION) {
+      // ja està en marxa: no dupliquem res, només tornem a exposar el llenç
+      window.arenaCanvas = window.arenaWall.canvas;
+      return;
+    }
+    // hi ha una versió anterior en marxa: l'aturem i arrenquem aquesta
+    try { window.arenaWall.stop(); } catch (e) {}
   }
+  console.log("[arena-wall] versió " + VERSION);
 
   const DEFAULT_CHANNEL = window.ARENA_CHANNEL || "ddbb-of-social-manifestations";
   const imageObjects = [];
@@ -59,6 +68,8 @@
     // imatge
     pixel: 0, contrast: 1, bright: 0, levels: 0, tint: "color",
     colA: "#101010", colB: "#ff3d2e",
+    // selecció d'imatges del canal: es mostren de la «selFrom» a la «selTo» (numerades des de 1)
+    selFrom: 1, selTo: 100,
     // resolució del llenç respecte a la finestra (1 = mateixa mida que Hydra)
     res: 1,
   };
@@ -436,7 +447,7 @@
   function buildCollage() {
     const rnd = mulberry(S.cSeed * 9973 + 17);
     const W = VW, H = VH, g = S.cGap;
-    const order = imageObjects.filter((o) => o.loaded);
+    const order = imageObjects.filter((o) => o.loaded && o.on);
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
@@ -487,7 +498,7 @@
     const col = S.layout === "collage";
     const lv = perImageFx ? level(S.sizeSrc, S.sizeLevel) : 0;
     for (const o of imageObjects) {
-      if (!o.loaded) continue;
+      if (!o.loaded || !o.on) continue;
       if (col && !o.cell) continue;
       const src = needsProc && o.pc ? o.pc : o.img;
       const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
@@ -577,6 +588,39 @@
     ctx.globalCompositeOperation = "source-over";
   }
 
+  /* ---------------------------------------------------------------- selecció d'imatges */
+  // totes les imatges del canal, en l'ordre d'Are.na, es numeren 1..total;
+  // es mostren només les que van de «selFrom» a «selTo»
+  let selSig = "", selTotal = 0;
+  function clampSel() {
+    const n = Math.max(1, selTotal);
+    S.selFrom = clamp(Math.round(S.selFrom), 1, n);
+    S.selTo = clamp(Math.round(S.selTo), 1, n);
+    if (S.selTo < S.selFrom) S.selTo = S.selFrom;
+  }
+  function updateSelection() {
+    const n = imageObjects.length;
+    if (n !== selTotal) { selTotal = n; clampSel(); syncSelUI(); }
+    const sig = [n, S.selFrom, S.selTo].join("|");
+    if (sig === selSig) return;
+    selSig = sig;
+    imageObjects.forEach((o, i) => { o.on = i + 1 >= S.selFrom && i + 1 <= S.selTo; });
+  }
+  // mou la finestra cap enrere o cap avant mantenint-ne la mida
+  function shiftSelection(dir) {
+    const n = selTotal;
+    if (!n) return;
+    const size = S.selTo - S.selFrom + 1;
+    const lastFrom = Math.max(1, n - size + 1);
+    let from = S.selFrom + dir * size;
+    // es para a l'últim grup sencer; si ja hi era, torna al principi (i al revés)
+    if (from > lastFrom) from = S.selFrom === lastFrom ? 1 : lastFrom;
+    else if (from < 1) from = S.selFrom === 1 ? lastFrom : 1;
+    S.selFrom = from;
+    S.selTo = Math.min(n, from + size - 1);
+    syncSelUI();
+  }
+
   let last = performance.now();
   let frameCount = 0;
   let rafId = 0;
@@ -608,13 +652,15 @@
       }
     }
 
+    updateSelection();
+
     if (S.layout !== lastLayout) {
       lastLayout = S.layout;
       if (S.layout !== "collage") setMode(S.mode);
     }
     if (S.layout === "collage") {
       const loadedN = imageObjects.reduce((a, o) => a + (o.loaded ? 1 : 0), 0);
-      const csig = [S.cCount, S.cGap, S.cIrreg, S.cSeed, W, H, loadedN, loadGen].join("|");
+      const csig = [S.cCount, S.cGap, S.cIrreg, S.cSeed, W, H, loadedN, loadGen, selSig].join("|");
       if (csig !== lastCollageSig) { lastCollageSig = csig; buildCollage(); }
       const k = 1 - Math.exp(-dt * 6);
       for (const o of imageObjects) {
@@ -688,15 +734,27 @@
     imageObjects.length = 0;
     setStatus(`Carregant «${channel}»…`);
     try {
-      const response = await fetch(`https://api.are.na/v2/channels/${encodeURIComponent(channel)}?per=100`);
-      if (!response.ok) throw new Error("HTTP " + response.status);
-      const data = await response.json();
-      if (gen !== loadGen) return;
-      const blocks = data.contents.filter((b) => b.class === "Image" && b.image);
+      // Are.na dona els blocs en pàgines de 100: les demanem totes
+      const all = [];
+      for (let page = 1; page <= 50; page++) {
+        const response = await fetch(`https://api.are.na/v2/channels/${encodeURIComponent(channel)}?per=100&page=${page}`);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+        if (gen !== loadGen) return;
+        const c = data.contents || [];
+        all.push(...c);
+        if (c.length < 100 || (data.length && all.length >= data.length)) break;
+        setStatus(`Carregant «${channel}»… ${all.length} blocs`);
+      }
+      const blocks = all.filter((b) => b.class === "Image" && b.image);
+      // el rang De / Fins a passa a cobrir tot el canal nou
+      selTotal = blocks.length;
+      S.selFrom = 1;
+      S.selTo = Math.max(1, blocks.length);
       let ok = 0, failed = 0;
       const report = () => {
         if (gen !== loadGen) return;
-        const msg = `«${channel}»: ${ok} imatges` + (failed ? ` · ${failed} omeses (sense CORS)` : "") +
+        const msg = `«${channel}»: ${blocks.length} imatges al canal · ${ok} carregades` + (failed ? ` · ${failed} omeses (sense CORS)` : "") +
           (ok + failed < blocks.length ? ` · carregant ${blocks.length - ok - failed}…` : ".");
         setStatus(msg);
       };
@@ -847,6 +905,49 @@
   const chanBtns = el("div", "btns");
   addButton(chanBtns, "Carrega el canal", () => loadChannel(chanInput.value));
   box.appendChild(chanBtns);
+
+  // selecció: quina part del canal es mostra (De … Fins a, de 1 al total del canal)
+  box.appendChild(el("h3", null, "Imatges que es mostren"));
+  const selLabel = el("div", "note");
+  box.appendChild(selLabel);
+  const mkRange = (key, label) => {
+    const row = el("label", "row");
+    const out = el("output");
+    const input = el("input");
+    input.type = "range"; input.min = 1; input.step = 1;
+    input.oninput = () => {
+      const v = parseInt(input.value, 10);
+      S[key] = v;
+      // De no pot passar de Fins a (i al revés): l'altre l'acompanya
+      if (key === "selFrom" && S.selTo < v) S.selTo = v;
+      if (key === "selTo" && S.selFrom > v) S.selFrom = v;
+      syncSelUI();
+    };
+    row.append(el("span", null, label), out, input);
+    box.appendChild(row);
+    return { input, out };
+  };
+  const selFromUI = mkRange("selFrom", "De la imatge");
+  const selToUI = mkRange("selTo", "Fins a la imatge");
+  const selBtns = el("div", "btns");
+  addButton(selBtns, "◀ anteriors", () => shiftSelection(-1));
+  addButton(selBtns, "següents ▶", () => shiftSelection(1));
+  addButton(selBtns, "Totes", () => { S.selFrom = 1; S.selTo = Math.max(1, selTotal); syncSelUI(); });
+  box.appendChild(selBtns);
+  function syncSelUI() {
+    const n = Math.max(1, selTotal);
+    clampSel();
+    for (const [ui, key] of [[selFromUI, "selFrom"], [selToUI, "selTo"]]) {
+      ui.input.max = n;
+      ui.input.value = S[key];
+      ui.out.textContent = S[key] + " / " + selTotal;
+    }
+    selLabel.textContent = !selTotal ? "Encara no hi ha imatges al canal."
+      : S.selFrom === 1 && S.selTo === selTotal ? `Totes: de la 1 a la ${selTotal}.`
+      : `De la ${S.selFrom} a la ${S.selTo} (${S.selTo - S.selFrom + 1} de ${selTotal}).`;
+  }
+  syncFns.push(syncSelUI);
+
   addSlider(box, "res", "Resolució del llenç (× mida de la finestra)", 0.25, 2, 0.05);
 
   /* --- Mode d'àudio */
@@ -1012,6 +1113,7 @@
     for (const k in meters) meters[k].style.width = audio.level[k] * 100 + "%";
   }
 
+  panel.appendChild(el("div", "note", "Versió: " + VERSION));
   statusEl = el("div");
   statusEl.id = "status";
   statusEl.textContent = lastStatus;
@@ -1020,7 +1122,7 @@
     "Dreceres (amb aquesta finestra activa):<br>" +
     "A: àudio individual / conjunt<br>1 · 2 · 3: mode de moviment<br>" +
     "E: canvia la direcció de l'estirament<br>L: lliure / collage<br>G: nou collage<br>" +
-    "C: neteja el llenç<br>Espai: rebarreja<br><br>" +
+    "C: neteja el llenç<br>Espai: rebarreja<br>← → (o , .): imatges anteriors / següents<br><br>" +
     "A Hydra: <code>s0.init({src: arenaCanvas, dynamic: true})</code><br>" +
     "Si tanques aquesta finestra: <code>arenaWall.panel()</code> o el botó ARENA.<br>" +
     "Ctrl+Shift+H amaga el codi de Hydra per capturar-ne la sortida."));
@@ -1037,6 +1139,8 @@
     else if (k === "c") clearCanvas();
     else if (k === "l") { S.layout = S.layout === "collage" ? "free" : "collage"; syncUI(); }
     else if (k === "g") { S.cSeed++; }
+    else if (k === "," || (k === "arrowleft" && t.type !== "range")) shiftSelection(-1);
+    else if (k === "." || (k === "arrowright" && t.type !== "range")) shiftSelection(1);
     else if (k === "e") {
       const order = STRETCH_DIRS.map((d) => d[0]);
       S.stretchDir = order[(order.indexOf(S.stretchDir) + 1) % order.length];
@@ -1109,6 +1213,7 @@
   /* ---------------------------------------------------------------- API per a Hydra */
   const api = {
     running: true,
+    version: VERSION,
     canvas: cv,
     state: S,
     level: audio.level,
@@ -1117,6 +1222,14 @@
     load: loadChannel,
     set(values) { Object.assign(S, values); if ("mode" in values) setMode(S.mode); else syncUI(); },
     reshuffle: reshufflePositions,
+    show(from, to) {
+      if (from != null) S.selFrom = from;
+      S.selTo = to != null ? to : selTotal;
+      syncSelUI();
+    },
+    get total() { return selTotal; },
+    next: () => shiftSelection(1),
+    prev: () => shiftSelection(-1),
     clear: clearCanvas,
     stop,
   };
